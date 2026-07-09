@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-bg text-zinc-200 antialiased font-body;
+}
+
+h1 {
+  @apply font-display uppercase italic tracking-wide;
+}
+
+.panel {
+  @apply bg-panel border border-panelBorder rounded-lg;
+}
+
+/* Angular Fitness Nation CTA - skewed parallelogram like the site's Join Now button */
+.btn {
+  @apply relative px-5 py-2 text-white text-sm font-bold uppercase tracking-wider transition-colors;
+  background: #c8102e;
+  transform: skewX(-8deg);
+}
+.btn > * { transform: skewX(8deg); }
+.btn:hover { background: #e01a2b; }
+.btn:disabled { opacity: 0.6; }
+
+.btn-ghost {
+  @apply px-3 py-1.5 rounded border border-panelBorder hover:border-accent hover:text-white text-sm text-zinc-300 transition-colors uppercase tracking-wide font-semibold;
+}
+
+.input {
+  @apply bg-black border border-panelBorder rounded px-3 py-2 text-sm w-full focus:outline-none focus:border-accent;
+}
+
+.nav-link {
+  @apply flex items-center gap-3 px-3 py-2 text-sm text-zinc-400 hover:text-white border-l-2 border-transparent transition-colors uppercase tracking-wide font-semibold;
+}
+
+.nav-link.active {
+  @apply text-white border-l-2;
+  border-left-color: #c8102e;
+  background: linear-gradient(90deg, rgba(200, 16, 46, 0.15), transparent);
+}
+
+.section-title {
+  @apply font-display uppercase italic text-white text-lg tracking-wide;
+}
