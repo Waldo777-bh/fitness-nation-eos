@@ -8,13 +8,26 @@ import { PageHeader, QuarterPicker, Avatar } from '@/components/ui';
 const PREVIEW_KEYS = ['dd_members', 'dd_revenue', 'avg_weekly_fee', 'new_dd_sales', 'shake_sales'];
 
 export default function QuarterSetupPage() {
-  const { supabase, quarters, metrics, team, activeQuarter, loading } = useEosCore();
+  const { supabase, quarters, metrics, team, activeTeam, activeQuarter, loading } = useEosCore();
   const { quarter, setQuarterId } = usePersistedQuarter(quarters, activeQuarter);
   const { targets, refresh } = useQuarterTargets(quarter?.id);
 
   const [form, setForm] = useState<Record<string, { start: string; target: string }>>({});
+  const [owners, setOwners] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const o: Record<string, string> = {};
+    for (const m of metrics) o[m.id] = m.owner_id ?? '';
+    setOwners(o);
+  }, [metrics]);
+
+  async function changeOwner(metricId: string, ownerId: string) {
+    setOwners((o) => ({ ...o, [metricId]: ownerId }));
+    const { error } = await supabase.from('metrics').update({ owner_id: ownerId || null }).eq('id', metricId);
+    if (error) setMsg(`Error saving owner: ${error.message}`);
+  }
 
   useEffect(() => {
     const f: Record<string, { start: string; target: string }> = {};
@@ -108,12 +121,22 @@ export default function QuarterSetupPage() {
                     <div className="flex items-center gap-2">
                       <span className="truncate">{m.name}</span>
                       {m.is_auto && <span className="text-[10px] px-1.5 py-0.5 rounded bg-panelBorder text-zinc-400 shrink-0">AUTO</span>}
-                      <Avatar member={teamById.get(m.owner_id ?? '')} />
                     </div>
                     <div className="text-[11px] text-zinc-500">
                       {growthLabel(m) ?? (m.is_auto && m.formula ? m.formula : '')}
                     </div>
                   </div>
+                  <select
+                    className="input !w-28 !py-1 text-xs"
+                    value={owners[m.id] ?? ''}
+                    onChange={(e) => changeOwner(m.id, e.target.value)}
+                    title="Metric owner"
+                  >
+                    <option value="">Owner…</option>
+                    {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {!activeTeam.some((t) => t.id === owners[m.id]) && owners[m.id] &&
+                      <option value={owners[m.id]}>{teamById.get(owners[m.id])?.name ?? 'Former member'}</option>}
+                  </select>
                   <input
                     className="input !w-28"
                     placeholder="Start"

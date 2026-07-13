@@ -17,11 +17,11 @@ export function useEosCore() {
       const [q, m, t] = await Promise.all([
         supabase.from('quarters').select('*').order('start_date'),
         supabase.from('metrics').select('*').eq('active', true).order('sort_order'),
-        supabase.from('team_members').select('*').eq('active', true).order('created_at'),
+        supabase.from('team_members').select('*').order('created_at'),
       ]);
       setQuarters((q.data as Quarter[]) ?? []);
       setMetrics((m.data as Metric[]) ?? []);
-      setTeam((t.data as TeamMember[]) ?? []);
+      setTeam((t.data as (TeamMember & { active: boolean })[]) ?? []);
       setLoading(false);
     })();
   }, [supabase]);
@@ -31,7 +31,13 @@ export function useEosCore() {
     return quarters.find((q) => q.start_date <= today && q.end_date >= today) ?? quarters[0];
   }, [quarters]);
 
-  return { supabase, quarters, metrics, team, activeQuarter, loading };
+  /** Team members still with the business - use for owner pickers and new assignments. */
+  const activeTeam = useMemo(
+    () => team.filter((t) => (t as TeamMember & { active?: boolean }).active !== false),
+    [team]
+  );
+
+  return { supabase, quarters, metrics, team, activeTeam, activeQuarter, loading };
 }
 
 export function useWeeklyEntries(quarterId: string | undefined) {

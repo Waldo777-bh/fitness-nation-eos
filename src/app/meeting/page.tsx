@@ -27,7 +27,7 @@ type Meeting = {
 };
 
 export default function MeetingPage() {
-  const { supabase, quarters, team, activeQuarter, loading } = useEosCore();
+  const { supabase, quarters, activeTeam: team, activeQuarter, loading } = useEosCore();
   const { quarter, setQuarterId } = usePersistedQuarter(quarters, activeQuarter);
   const [week, setWeek] = useState<number | null>(null);
   const weekNum = week ?? defaultWeek(quarter);

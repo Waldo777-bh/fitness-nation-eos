@@ -13,32 +13,52 @@ const PRIORITY_STYLE: Record<number, string> = {
   3: 'bg-zinc-700/40 text-zinc-400',
 };
 
-type FullIssue = Issue & { category: string; description: string | null; resolved_at: string | null };
+type Draft = { title: string; description: string; ownerId: string; category: string; priority: number };
+const emptyDraft: Draft = { title: '', description: '', ownerId: '', category: 'other', priority: 2 };
 
 export default function IssuesPage() {
-  const { supabase, team, loading } = useEosCore();
-  const [issues, setIssues] = useState<FullIssue[]>([]);
+  const { supabase, team, activeTeam, loading } = useEosCore();
+  const [issues, setIssues] = useState<Issue[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showResolved, setShowResolved] = useState(true);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [ownerId, setOwnerId] = useState('');
-  const [category, setCategory] = useState('other');
-  const [priority, setPriority] = useState(2);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft>(emptyDraft);
 
   async function load() {
     const { data } = await supabase.from('issues').select('*').order('priority').order('created_at', { ascending: false });
-    setIssues((data as FullIssue[]) ?? []);
+    setIssues((data as Issue[]) ?? []);
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [supabase]);
 
-  async function addIssue() {
-    if (!title.trim()) return;
-    await supabase.from('issues').insert({
-      title, description: description || null, owner_id: ownerId || null,
-      category, priority, status: 'to_discuss',
+  function startAdd() {
+    setEditingId(null);
+    setDraft(emptyDraft);
+    setShowForm((s) => !s);
+  }
+
+  function startEdit(i: Issue) {
+    setEditingId(i.id);
+    setShowForm(false);
+    setDraft({
+      title: i.title, description: i.description ?? '', ownerId: i.owner_id ?? '',
+      category: i.category ?? 'other', priority: i.priority ?? 2,
     });
-    setTitle(''); setDescription(''); setOwnerId(''); setCategory('other'); setPriority(2); setShowForm(false);
+  }
+
+  async function saveDraft() {
+    if (!draft.title.trim()) return;
+    const row = {
+      title: draft.title, description: draft.description || null, owner_id: draft.ownerId || null,
+      category: draft.category, priority: draft.priority,
+    };
+    if (editingId) {
+      await supabase.from('issues').update(row).eq('id', editingId);
+      setEditingId(null);
+    } else {
+      await supabase.from('issues').insert({ ...row, status: 'to_discuss' });
+      setShowForm(false);
+    }
+    setDraft(emptyDraft);
     load();
   }
 
@@ -49,55 +69,79 @@ export default function IssuesPage() {
     load();
   }
 
+  async function removeIssue(id: string) {
+    if (!confirm('Delete this issue?')) return;
+    await supabase.from('issues').delete().eq('id', id);
+    load();
+  }
+
   if (loading) return <p className="text-zinc-500">Loading…</p>;
 
   const toDiscuss = issues.filter((i) => i.status === 'to_discuss');
   const inProgress = issues.filter((i) => i.status === 'in_progress');
   const resolved = issues.filter((i) => i.status === 'resolved');
 
-  const IssueRow = ({ i, actions }: { i: FullIssue; actions: React.ReactNode }) => (
-    <div className="flex items-center gap-3 px-5 py-3">
-      <Avatar member={team.find((t) => t.id === i.owner_id)} />
-      <div className="flex-1 min-w-0">
-        <div className="truncate">{i.title}</div>
-        {i.description && <div className="text-xs text-zinc-500 truncate">{i.description}</div>}
+  const DraftForm = ({ onCancel }: { onCancel: () => void }) => (
+    <div className="flex flex-col gap-3">
+      <input className="input" placeholder="Issue title" value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
+      <textarea className="input min-h-20" placeholder="Details (optional)" value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
+      <div className="flex gap-3 flex-wrap">
+        <select className="input !w-auto" value={draft.ownerId} onChange={(e) => setDraft((d) => ({ ...d, ownerId: e.target.value }))}>
+          <option value="">Owner…</option>
+          {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <select className="input !w-auto" value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}>
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>)}
+        </select>
+        <select className="input !w-auto" value={draft.priority} onChange={(e) => setDraft((d) => ({ ...d, priority: Number(e.target.value) }))}>
+          <option value={1}>High</option>
+          <option value={2}>Medium</option>
+          <option value={3}>Low</option>
+        </select>
+        <button className="btn" onClick={saveDraft}><span>Save</span></button>
+        <button className="btn-ghost" onClick={onCancel}>Cancel</button>
       </div>
-      <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${PRIORITY_STYLE[i.priority] ?? PRIORITY_STYLE[3]}`}>
-        {PRIORITY_LABEL[i.priority] ?? 'Low'}
-      </span>
-      <span className="text-[10px] px-2 py-0.5 rounded bg-panelBorder text-zinc-400 uppercase">{i.category}</span>
-      <span className="text-xs text-zinc-600 w-24 text-right">
-        {new Date(i.resolved_at ?? i.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
-      </span>
-      {actions}
     </div>
   );
+
+  const IssueRow = ({ i, actions }: { i: Issue; actions: React.ReactNode }) => {
+    if (editingId === i.id) {
+      return (
+        <div className="px-5 py-4 bg-accent/5">
+          <DraftForm onCancel={() => setEditingId(null)} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-3 px-5 py-3 group">
+        <Avatar member={team.find((t) => t.id === i.owner_id)} />
+        <div className="flex-1 min-w-0">
+          <div className="truncate">{i.title}</div>
+          {i.description && <div className="text-xs text-zinc-500 truncate">{i.description}</div>}
+        </div>
+        <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${PRIORITY_STYLE[i.priority] ?? PRIORITY_STYLE[3]}`}>
+          {PRIORITY_LABEL[i.priority] ?? 'Low'}
+        </span>
+        <span className="text-[10px] px-2 py-0.5 rounded bg-panelBorder text-zinc-400 uppercase">{i.category}</span>
+        <span className="text-xs text-zinc-600 w-24 text-right">
+          {new Date(i.resolved_at ?? i.created_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+        </span>
+        <button className="btn-ghost text-xs opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => startEdit(i)}>Edit</button>
+        <button className="btn-ghost text-xs opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => removeIssue(i.id)}>Delete</button>
+        {actions}
+      </div>
+    );
+  };
 
   return (
     <>
       <PageHeader title="Issues" subtitle="Identify, Discuss, Solve (IDS)">
-        <button className="btn" onClick={() => setShowForm((s) => !s)}><span>+ Add Issue</span></button>
+        <button className="btn" onClick={startAdd}><span>+ Add Issue</span></button>
       </PageHeader>
 
       {showForm && (
-        <div className="panel p-5 mb-5 flex flex-col gap-3">
-          <input className="input" placeholder="Issue title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea className="input" placeholder="Details (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <div className="flex gap-3 flex-wrap">
-            <select className="input !w-auto" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-              <option value="">Owner…</option>
-              {team.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            <select className="input !w-auto" value={category} onChange={(e) => setCategory(e.target.value)}>
-              {CATEGORIES.map((c) => <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>)}
-            </select>
-            <select className="input !w-auto" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
-              <option value={1}>High</option>
-              <option value={2}>Medium</option>
-              <option value={3}>Low</option>
-            </select>
-            <button className="btn" onClick={addIssue}><span>Save</span></button>
-          </div>
+        <div className="panel p-5 mb-5">
+          <DraftForm onCancel={() => setShowForm(false)} />
         </div>
       )}
 

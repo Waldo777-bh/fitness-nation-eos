@@ -60,16 +60,23 @@ export default function TrendChart({
         ))}
         {series.map((s) => {
           let d = '';
+          const dots: Array<{ px: number; py: number }> = [];
           s.points.slice(0, weeks).forEach((p, i) => {
             if (p === null || p === undefined) return;
             const px = x(i);
             const py = y(p, s.axis ?? 'left');
             d += d ? ` L ${px} ${py}` : `M ${px} ${py}`;
+            dots.push({ px, py });
           });
-          if (!d) return null;
+          if (!dots.length) return null;
           return (
-            <path key={s.label} d={d} fill="none" stroke={s.color} strokeWidth="2"
-              strokeDasharray={s.dashed ? '5 4' : undefined} opacity={s.dashed ? 0.7 : 1} />
+            <g key={s.label} opacity={s.dashed ? 0.7 : 1}>
+              <path d={d} fill="none" stroke={s.color} strokeWidth="2"
+                strokeDasharray={s.dashed ? '5 4' : undefined} />
+              {!s.dashed && dots.map((pt, i) => (
+                <circle key={i} cx={pt.px} cy={pt.py} r="3" fill={s.color} />
+              ))}
+            </g>
           );
         })}
       </svg>

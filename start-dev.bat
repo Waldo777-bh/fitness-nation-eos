@@ -12,6 +12,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Stopping any previous dev servers on ports 3000/3001...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3000 .*LISTENING"') do taskkill /F /PID %%p >nul 2>nul
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3001 .*LISTENING"') do taskkill /F /PID %%p >nul 2>nul
+
 echo Copying app to a local folder (avoids OneDrive sync problems)...
 robocopy "%SRC%." "%DEST%" /MIR /XD node_modules .next .git /XF start-dev.bat push-to-github.bat dev-log.txt /NFL /NDL /NJH /NJS >nul
 cd /d "%DEST%"

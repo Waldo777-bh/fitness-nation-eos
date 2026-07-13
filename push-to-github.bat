@@ -11,23 +11,22 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if exist .git rmdir /s /q .git
-git init -b main
+if not exist .git (
+  git init -b main
+  git remote add origin %REPO_URL%
+)
 git config user.name "Brent"
 git config user.email "brent@fitnessnation.au"
 git add -A
-git commit -m "Fitness Nation EOS - full build: branded UI, EOS pages, API sync, migrated data"
-git remote add origin %REPO_URL%
-
+git commit -m "Update %date% %time%"
 echo.
 echo Pushing to %REPO_URL%
-echo A browser window may open asking you to authorise GitHub - that's normal.
 git push -u origin main
 if errorlevel 1 (
   echo.
-  echo Push FAILED - see the error above.
+  echo Push FAILED - see the error above. Tell Claude what it says.
 ) else (
   echo.
-  echo SUCCESS - code is on GitHub.
+  echo SUCCESS - changes are on GitHub.
 )
 pause

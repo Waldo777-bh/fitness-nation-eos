@@ -6,3 +6,5 @@ node_modules
 next-env.d.ts
 dev-log.txt
 docs/SECRETS.local.md
+inbox/
+docs/clubfit-ingest-log.md
