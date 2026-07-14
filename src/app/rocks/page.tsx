@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEosCore, usePersistedQuarter } from '@/lib/hooks';
 import { PageHeader, QuarterPicker, Avatar } from '@/components/ui';
 import type { Rock } from '@/lib/types';
@@ -34,6 +34,12 @@ export default function RocksPage() {
   const [ownerId, setOwnerId] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  const overIdRef = useRef<string | null>(null);
+  const rocksRef = useRef<Rock[]>([]);
+  rocksRef.current = rocks;
+  const setDrag = (id: string | null) => { dragIdRef.current = id; setDragId(id); };
+  const setOver = (id: string | null) => { overIdRef.current = id; setOverId(id); };
 
   async function load() {
     if (!quarter) return;
@@ -91,15 +97,12 @@ export default function RocksPage() {
   const setProgressLocal = (id: string, val: number) =>
     setRocks((rs) => rs.map((x) => (x.id === id ? { ...x, progress: val } : x)));
 
-  // Drag to reorder (matches the old EOS platform): moving a card rewrites sort_order.
-  function handleDrop(targetId: string) {
-    const from = dragId;
-    setDragId(null);
-    setOverId(null);
-    if (!from || from === targetId) return;
-    const list = [...rocks];
+  // Drag to reorder (matches the old EOS platform): grab a card anywhere and move
+  // it. Uses pointer events (not native HTML5 drag) so the whole card is grabbable.
+  function reorder(from: string, to: string) {
+    const list = [...rocksRef.current];
     const fromIdx = list.findIndex((r) => r.id === from);
-    const toIdx = list.findIndex((r) => r.id === targetId);
+    const toIdx = list.findIndex((r) => r.id === to);
     if (fromIdx < 0 || toIdx < 0) return;
     const [moved] = list.splice(fromIdx, 1);
     list.splice(toIdx, 0, moved);
@@ -107,6 +110,38 @@ export default function RocksPage() {
     setRocks(reordered);
     Promise.all(reordered.map((r, i) => supabase.from('rocks').update({ sort_order: i }).eq('id', r.id)));
   }
+
+  function onCardPointerDown(e: React.PointerEvent, id: string) {
+    // Let the interactive controls (slider, number box, dropdown, buttons) work normally.
+    if ((e.target as HTMLElement).closest('input, select, button, textarea, a')) return;
+    if (editingId) return;
+    e.preventDefault();
+    setDrag(id);
+    setOver(id);
+  }
+
+  useEffect(() => {
+    if (!dragId) return;
+    const onMove = (e: PointerEvent) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+      const card = el?.closest('[data-rock-id]') as HTMLElement | null;
+      if (card?.dataset.rockId) setOver(card.dataset.rockId);
+    };
+    const onUp = () => {
+      const from = dragIdRef.current;
+      const to = overIdRef.current;
+      setDrag(null);
+      setOver(null);
+      if (from && to && from !== to) reorder(from, to);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragId]);
 
   if (loading) return <p className="text-zinc-500">Loading...</p>;
 
@@ -140,24 +175,15 @@ export default function RocksPage() {
     return (
       <div
         key={r.id}
-        onDragOver={(e) => { e.preventDefault(); setOverId(r.id); }}
-        onDragLeave={() => setOverId((s) => (s === r.id ? null : s))}
-        onDrop={() => handleDrop(r.id)}
-        className={`panel p-4 transition-colors ${dragId === r.id ? 'opacity-50' : ''} ${overId === r.id && dragId && dragId !== r.id ? 'border-accent' : ''}`}
+        data-rock-id={r.id}
+        onPointerDown={(e) => onCardPointerDown(e, r.id)}
+        className={`panel p-4 transition-colors cursor-grab active:cursor-grabbing ${dragId ? 'select-none' : ''} ${dragId === r.id ? 'opacity-50' : ''} ${overId === r.id && dragId && dragId !== r.id ? 'border-accent ring-1 ring-accent' : ''}`}
       >
         <div className="flex items-start gap-2">
-          <div
-            draggable
-            onDragStart={() => setDragId(r.id)}
-            onDragEnd={() => { setDragId(null); setOverId(null); }}
-            className="flex items-start gap-2 flex-1 min-w-0 cursor-grab active:cursor-grabbing"
-            title="Drag to reorder"
-          >
-            <span className="text-zinc-600 select-none leading-none mt-1">⠿</span>
-            <div className="min-w-0">
-              <h3 className="font-semibold text-white leading-snug">{r.title}</h3>
-              <p className="text-xs text-zinc-500">{quarter?.label}</p>
-            </div>
+          <span className="text-zinc-600 select-none leading-none mt-1" title="Drag to reorder">⠿</span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-white leading-snug">{r.title}</h3>
+            <p className="text-xs text-zinc-500">{quarter?.label}</p>
           </div>
           <button className="btn-ghost text-xs" onClick={() => startEdit(r)}>Edit</button>
           <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase shrink-0 ${badge.cls}`}>{badge.label}</span>
