@@ -101,7 +101,7 @@ export default function DashboardPage() {
       const pifS = pif ? startByMetric.get(pif.id) : null;
       const start = ddS === null || ddS === undefined ? null : Number(ddS) + Number(pifS ?? 0);
       return {
-        id: 'total_members', name: 'Total Members', unit: 'count',
+        id: 'total_members', name: 'Total Members', unit: 'count' as const,
         actual: sum(ddE?.actual, pifE?.actual), target: sum(ddE?.target, pifE?.target),
         start, direction: 'up' as const,
       };
