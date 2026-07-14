@@ -75,19 +75,21 @@ export default function IssuesPage() {
     load();
   }
 
-  if (loading) return <p className="text-zinc-500">Loading…</p>;
+  if (loading) return <p className="text-zinc-500">Loading...</p>;
 
   const toDiscuss = issues.filter((i) => i.status === 'to_discuss');
   const inProgress = issues.filter((i) => i.status === 'in_progress');
   const resolved = issues.filter((i) => i.status === 'resolved');
 
-  const DraftForm = ({ onCancel }: { onCancel: () => void }) => (
+  // Rendered inline (a plain function, NOT a nested <Component/>) so typing
+  // never remounts the inputs and the field keeps focus.
+  const draftForm = (onCancel: () => void) => (
     <div className="flex flex-col gap-3">
       <input className="input" placeholder="Issue title" value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
       <textarea className="input min-h-20" placeholder="Details (optional)" value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
       <div className="flex gap-3 flex-wrap">
         <select className="input !w-auto" value={draft.ownerId} onChange={(e) => setDraft((d) => ({ ...d, ownerId: e.target.value }))}>
-          <option value="">Owner…</option>
+          <option value="">Owner</option>
           {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <select className="input !w-auto" value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}>
@@ -104,16 +106,16 @@ export default function IssuesPage() {
     </div>
   );
 
-  const IssueRow = ({ i, actions }: { i: Issue; actions: React.ReactNode }) => {
+  const issueRow = (i: Issue, actions: React.ReactNode) => {
     if (editingId === i.id) {
       return (
-        <div className="px-5 py-4 bg-accent/5">
-          <DraftForm onCancel={() => setEditingId(null)} />
+        <div key={i.id} className="px-5 py-4 bg-accent/5">
+          {draftForm(() => setEditingId(null))}
         </div>
       );
     }
     return (
-      <div className="flex items-center gap-3 px-5 py-3 group">
+      <div key={i.id} className="flex items-center gap-3 px-5 py-3 group">
         <Avatar member={team.find((t) => t.id === i.owner_id)} />
         <div className="flex-1 min-w-0">
           <div className="truncate">{i.title}</div>
@@ -141,7 +143,7 @@ export default function IssuesPage() {
 
       {showForm && (
         <div className="panel p-5 mb-5">
-          <DraftForm onCancel={() => setShowForm(false)} />
+          {draftForm(() => setShowForm(false))}
         </div>
       )}
 
@@ -151,14 +153,12 @@ export default function IssuesPage() {
           <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full font-bold">{toDiscuss.length}</span>
         </div>
         <div className="divide-y divide-panelBorder/60">
-          {toDiscuss.map((i) => (
-            <IssueRow key={i.id} i={i} actions={
-              <div className="flex gap-2">
-                <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'in_progress')}>Start</button>
-                <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'resolved')}>Resolve</button>
-              </div>
-            } />
-          ))}
+          {toDiscuss.map((i) => issueRow(i, (
+            <div className="flex gap-2">
+              <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'in_progress')}>Start</button>
+              <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'resolved')}>Resolve</button>
+            </div>
+          )))}
           {!toDiscuss.length && <p className="text-zinc-600 text-sm px-5 py-4">Nothing waiting for discussion.</p>}
         </div>
       </div>
@@ -169,14 +169,12 @@ export default function IssuesPage() {
           <span className="text-xs bg-warn/20 text-warn px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
         </div>
         <div className="divide-y divide-panelBorder/60">
-          {inProgress.map((i) => (
-            <IssueRow key={i.id} i={i} actions={
-              <div className="flex gap-2">
-                <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'resolved')}>Resolve</button>
-                <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'dropped')}>Drop</button>
-              </div>
-            } />
-          ))}
+          {inProgress.map((i) => issueRow(i, (
+            <div className="flex gap-2">
+              <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'resolved')}>Resolve</button>
+              <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'dropped')}>Drop</button>
+            </div>
+          )))}
           {!inProgress.length && <p className="text-zinc-600 text-sm px-5 py-4">Nothing in progress.</p>}
         </div>
       </div>
@@ -191,11 +189,9 @@ export default function IssuesPage() {
         </div>
         {showResolved && (
           <div className="divide-y divide-panelBorder/60">
-            {resolved.map((i) => (
-              <IssueRow key={i.id} i={i} actions={
-                <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'to_discuss')}>Reopen</button>
-              } />
-            ))}
+            {resolved.map((i) => issueRow(i, (
+              <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'to_discuss')}>Reopen</button>
+            )))}
             {!resolved.length && <p className="text-zinc-600 text-sm px-5 py-4">No resolved issues yet.</p>}
           </div>
         )}

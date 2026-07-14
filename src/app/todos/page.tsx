@@ -55,19 +55,20 @@ export default function TodosPage() {
     load();
   }
 
-  if (loading) return <p className="text-zinc-500">Loading…</p>;
+  if (loading) return <p className="text-zinc-500">Loading...</p>;
   const open = todos.filter((t) => !t.done);
   const done = todos.filter((t) => t.done);
   const pct = todos.length ? Math.round((done.length / todos.length) * 100) : 0;
   const today = new Date().toISOString().slice(0, 10);
 
-  const Row = ({ t }: { t: Todo }) => {
+  // Inline function (not a nested <Component/>) so the edit input keeps focus while typing.
+  const row = (t: Todo) => {
     if (editingId === t.id) {
       return (
-        <div className="flex items-center gap-2 px-5 py-2.5 bg-accent/5 flex-wrap">
+        <div key={t.id} className="flex items-center gap-2 px-5 py-2.5 bg-accent/5 flex-wrap">
           <input className="input flex-1 min-w-40" value={edit.title} onChange={(e) => setEdit((x) => ({ ...x, title: e.target.value }))} onKeyDown={(e) => e.key === 'Enter' && saveEdit()} />
           <select className="input !w-auto" value={edit.ownerId} onChange={(e) => setEdit((x) => ({ ...x, ownerId: e.target.value }))}>
-            <option value="">Owner…</option>
+            <option value="">Owner</option>
             {activeTeam.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
           <input className="input !w-auto" type="date" value={edit.due} onChange={(e) => setEdit((x) => ({ ...x, due: e.target.value }))} />
@@ -77,7 +78,7 @@ export default function TodosPage() {
       );
     }
     return (
-      <div className="flex items-center gap-3 px-5 py-3 group">
+      <div key={t.id} className="flex items-center gap-3 px-5 py-3 group">
         <input type="checkbox" checked={t.done} onChange={() => toggle(t)} className="accent-green-500 w-4 h-4" />
         <Avatar member={team.find((m) => m.id === t.owner_id)} />
         <span className={`flex-1 ${t.done ? 'line-through text-zinc-500' : ''}`}>{t.title}</span>
@@ -97,9 +98,9 @@ export default function TodosPage() {
       <PageHeader title="To-Dos" subtitle="Weekly action items" />
 
       <div className="panel p-4 mb-5 flex gap-3 flex-wrap">
-        <input className="input flex-1 min-w-48" placeholder="New to-do…" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTodo()} />
+        <input className="input flex-1 min-w-48" placeholder="New to-do..." value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTodo()} />
         <select className="input !w-auto" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-          <option value="">Owner…</option>
+          <option value="">Owner</option>
           {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <input className="input !w-auto" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
@@ -114,7 +115,7 @@ export default function TodosPage() {
               <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full font-bold">{open.length} remaining</span>
             </div>
             <div className="divide-y divide-panelBorder/60">
-              {open.map((t) => <Row key={t.id} t={t} />)}
+              {open.map((t) => row(t))}
               {!open.length && <p className="text-zinc-600 text-sm px-5 py-4">All clear.</p>}
             </div>
           </div>
@@ -127,7 +128,7 @@ export default function TodosPage() {
             </div>
             {showDone && (
               <div className="divide-y divide-panelBorder/60">
-                {done.map((t) => <Row key={t.id} t={t} />)}
+                {done.map((t) => row(t))}
                 {!done.length && <p className="text-zinc-600 text-sm px-5 py-4">Nothing completed yet.</p>}
               </div>
             )}
