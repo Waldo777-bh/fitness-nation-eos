@@ -14,11 +14,10 @@ Every missing FUNCTION has been added so the new site matches the old:
 - History: added the per-meeting Actions column — Edit (rating, cascading, notes) and Delete.
 - Dashboard: added the "Next L10: <date>" line and switched the 2nd KPI to the combined "Total Members" (DD + PIF).
 
-Two remaining differences are layout-only (same functions, different arrangement) and were left as the newer design:
-- Rocks is a 4-column Kanban (old was one drag-to-reorder list). All rock actions exist in both.
-- Issues shows To Discuss / In Progress / Resolved stacked (old was two columns side by side). All issue actions exist in both.
+- Rocks: reverted from the Kanban back to the old single drag-to-reorder grid of priority cards (status badge, progress number + slider, owner, status dropdown).
 
-Tell me if you want either of those two reverted to the old layout.
+One remaining difference is layout-only (same functions, different arrangement):
+- Issues shows To Discuss / In Progress / Resolved stacked (old was two columns side by side). All issue actions exist in both. Say the word if you want it reverted too.
 
 ---
 
