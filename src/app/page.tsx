@@ -9,7 +9,7 @@ import TrendChart, { type Series } from '@/components/TrendChart';
 import type { Rock, Issue, Todo } from '@/lib/types';
 
 const HEADLINE_KEYS = [
-  'dd_members', 'pif_members', 'net_dd_growth', 'new_dd_sales', 'dd_cancellations', 'shake_sales',
+  'dd_members', 'total_members', 'net_dd_growth', 'new_dd_sales', 'dd_cancellations', 'shake_sales',
   'total_revenue', 'dd_revenue', 'fitness_passport_revenue', 'retail_revenue', 'google_reviews_week', 'google_star_rating',
 ];
 
@@ -88,7 +88,41 @@ export default function DashboardPage() {
       ];
     });
 
-  const headline = HEADLINE_KEYS.map((k) => keyToMetric.get(k)).filter(Boolean);
+  // Per-card data. 'total_members' is a computed card (DD + PIF), matching the old app.
+  const cardData = (key: string) => {
+    if (key === 'total_members') {
+      const dd = keyToMetric.get('dd_members');
+      const pif = keyToMetric.get('pif_members');
+      const ddE = dd ? weekEntries.get(dd.id) : undefined;
+      const pifE = pif ? weekEntries.get(pif.id) : undefined;
+      const sum = (a?: number | null, b?: number | null) =>
+        a === null || a === undefined ? (b ?? null) : Number(a) + Number(b ?? 0);
+      const ddS = dd ? startByMetric.get(dd.id) : null;
+      const pifS = pif ? startByMetric.get(pif.id) : null;
+      const start = ddS === null || ddS === undefined ? null : Number(ddS) + Number(pifS ?? 0);
+      return {
+        id: 'total_members', name: 'Total Members', unit: 'count',
+        actual: sum(ddE?.actual, pifE?.actual), target: sum(ddE?.target, pifE?.target),
+        start, direction: 'up' as const,
+      };
+    }
+    const metric = keyToMetric.get(key);
+    if (!metric) return null;
+    const e = weekEntries.get(metric.id);
+    return {
+      id: metric.id, name: metric.name, unit: metric.unit,
+      actual: e?.actual ?? null, target: e?.target ?? null,
+      start: startByMetric.get(metric.id) ?? null, direction: metric.direction,
+    };
+  };
+
+  // Next L10 falls on the weekly meeting day (Tuesday); show the next occurrence incl. today.
+  const nextL10 = (() => {
+    const d = new Date();
+    const add = (2 - d.getDay() + 7) % 7;
+    const t = new Date(d.getFullYear(), d.getMonth(), d.getDate() + add);
+    return t.toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  })();
 
   const openTodos = todos.filter((t) => !t.done);
   if (loading) return <p className="text-zinc-500">Loading…</p>;
@@ -99,6 +133,8 @@ export default function DashboardPage() {
         <WeekPicker weeks={quarter?.weeks ?? 13} value={weekNum} onChange={setWeek} />
         <QuarterPicker quarters={quarters} value={quarter?.id} onChange={(id) => { setQuarterId(id); setWeek(null); }} />
       </PageHeader>
+
+      <p className="text-sm text-zinc-500 -mt-3 mb-5">Next L10: <span className="text-zinc-300">{nextL10}</span></p>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="panel p-6 border-good/40 bg-good/5 text-center">
@@ -112,21 +148,20 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        {headline.map((metric) => {
-          if (!metric) return null;
-          const e = weekEntries.get(metric.id);
-          const ok = e ? isOnTrack(metric, e.target, e.actual) : null;
-          const start = startByMetric.get(metric.id);
+        {HEADLINE_KEYS.map((key) => {
+          const d = cardData(key);
+          if (!d) return null;
+          const ok = d.actual === null || d.target === null ? null : d.direction === 'down' ? d.actual <= d.target : d.actual >= d.target;
           const vsStart =
-            e?.actual !== null && e?.actual !== undefined && start !== null && start !== undefined && Number(start) !== 0
-              ? ((Number(e.actual) - Number(start)) / Math.abs(Number(start))) * 100
+            d.actual !== null && d.actual !== undefined && d.start !== null && d.start !== undefined && Number(d.start) !== 0
+              ? ((Number(d.actual) - Number(d.start)) / Math.abs(Number(d.start))) * 100
               : null;
-          const vsGood = vsStart === null ? null : metric.direction === 'down' ? vsStart <= 0 : vsStart >= 0;
+          const vsGood = vsStart === null ? null : d.direction === 'down' ? vsStart <= 0 : vsStart >= 0;
           return (
-            <div key={metric.id} className="panel p-3">
-              <div className="text-[10px] uppercase tracking-wide text-zinc-500 h-7">{metric.name}</div>
+            <div key={d.id} className="panel p-3">
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500 h-7">{d.name}</div>
               <div className="flex items-center justify-between mt-1">
-                <span className="text-lg font-bold text-white">{formatValue(e?.actual ?? null, metric.unit)}</span>
+                <span className="text-lg font-bold text-white">{formatValue(d.actual, d.unit)}</span>
                 <StatusDot ok={ok} />
               </div>
               <div className={`text-[11px] mt-1 ${vsGood === null ? 'text-zinc-600' : vsGood ? 'text-good' : 'text-bad'}`}>

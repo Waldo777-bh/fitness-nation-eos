@@ -34,13 +34,41 @@ export default function HistoryPage() {
   const { supabase, quarters, loading } = useEosCore();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [logs, setLogs] = useState<SyncLog[]>([]);
+  const [editing, setEditing] = useState<Meeting | null>(null);
+  const [form, setForm] = useState<{ rating: number; cascading: string; notes: string }>({ rating: 8, cascading: '', notes: '' });
 
+  async function loadMeetings() {
+    const { data } = await supabase.from('meetings').select('*').order('meeting_date', { ascending: false }).limit(60);
+    setMeetings((data as Meeting[]) ?? []);
+  }
   useEffect(() => {
-    supabase.from('meetings').select('*').order('meeting_date', { ascending: false }).limit(60)
-      .then(({ data }) => setMeetings((data as Meeting[]) ?? []));
+    loadMeetings();
     supabase.from('sync_logs').select('*').order('created_at', { ascending: false }).limit(30)
       .then(({ data }) => setLogs((data as SyncLog[]) ?? []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
+
+  function startEdit(m: Meeting) {
+    setEditing(m);
+    setForm({ rating: Number(m.ratings?.overall) || 8, cascading: m.cascading_messages ?? '', notes: m.notes ?? '' });
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    await supabase.from('meetings').update({
+      ratings: { overall: form.rating },
+      cascading_messages: form.cascading || null,
+      notes: form.notes || null,
+    }).eq('id', editing.id);
+    setEditing(null);
+    loadMeetings();
+  }
+
+  async function deleteMeeting(id: string) {
+    if (!confirm('Delete this meeting? This cannot be undone.')) return;
+    await supabase.from('meetings').delete().eq('id', id);
+    loadMeetings();
+  }
 
   if (loading) return <p className="text-zinc-500">Loading…</p>;
 
@@ -86,6 +114,7 @@ export default function HistoryPage() {
               <th className="py-2 font-normal text-center">Rating</th>
               <th className="py-2 font-normal">Cascading Messages</th>
               <th className="py-2 font-normal">Notes</th>
+              <th className="py-2 font-normal text-right px-5">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -104,11 +133,15 @@ export default function HistoryPage() {
                   <td className="py-2.5 text-center">{avg ? avg.toFixed(0) : '–'}</td>
                   <td className="py-2.5 text-zinc-400 max-w-56 truncate">{m.cascading_messages ?? '–'}</td>
                   <td className="py-2.5 text-zinc-400 max-w-56 truncate">{m.notes ?? '–'}</td>
+                  <td className="py-2.5 px-5 text-right whitespace-nowrap">
+                    <button className="btn-ghost text-xs" onClick={() => startEdit(m)}>Edit</button>
+                    <button className="btn-ghost text-xs text-bad" onClick={() => deleteMeeting(m.id)}>Delete</button>
+                  </td>
                 </tr>
               );
             })}
             {!meetings.length && (
-              <tr><td colSpan={6} className="px-5 py-6 text-zinc-600">No meetings recorded yet.</td></tr>
+              <tr><td colSpan={7} className="px-5 py-6 text-zinc-600">No meetings recorded yet.</td></tr>
             )}
           </tbody>
         </table>
@@ -130,6 +163,35 @@ export default function HistoryPage() {
           {!logs.length && <p className="text-zinc-600 text-sm px-5 py-4">No syncs have run yet - they start once the app is deployed with API keys.</p>}
         </div>
       </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={() => setEditing(null)}>
+          <div className="panel w-full max-w-md p-6" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-white">Edit Meeting — Week {editing.week_number ?? '–'}</h2>
+              <button className="text-zinc-500 hover:text-white text-xl leading-none" onClick={() => setEditing(null)} aria-label="Close">×</button>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-zinc-400 uppercase tracking-wide">Rating</label>
+                  <span className="text-xl font-mono text-white">{form.rating}</span>
+                </div>
+                <input type="range" min={1} max={10} step={1} value={form.rating} onChange={(e) => setForm((f) => ({ ...f, rating: Number(e.target.value) }))} className="w-full h-2 accent-accent mt-1 cursor-pointer" />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 uppercase tracking-wide">Cascading Messages</label>
+                <textarea className="input min-h-20 mt-1" value={form.cascading} onChange={(e) => setForm((f) => ({ ...f, cascading: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 uppercase tracking-wide">Notes</label>
+                <textarea className="input min-h-24 mt-1" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+              </div>
+              <button className="btn w-full justify-center" onClick={saveEdit}><span>Save Changes</span></button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

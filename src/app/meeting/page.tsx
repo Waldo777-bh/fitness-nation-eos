@@ -16,10 +16,18 @@ const AGENDA = [
   { id: 'quarterly-focus', name: 'Quarterly Focus Check', mins: 10, desc: 'Are we on track for the quarter?', link: '/rocks' },
   { id: 'todos', name: 'To-Do Review', mins: 5, desc: 'Done / not done from last week', link: '/todos' },
   { id: 'cascading', name: 'Cascading Messages', mins: 5, desc: 'What gets communicated to the team', link: null },
-  { id: 'rating', name: 'Rating the Meeting', mins: 5, desc: 'Everyone rates the meeting 1-10', link: null },
+  { id: 'rating', name: 'Rating the Meeting', mins: 5, desc: '1-10 rating', link: null },
 ] as const;
 
 const TOTAL_MINS = AGENDA.reduce((s, a) => s + a.mins, 0);
+
+// Matches the original app exactly: single 1-10 meeting rating with banded caption.
+const ratingCaption = (v: number) =>
+  v >= 8
+    ? 'Great meeting! This is Level 10 quality.'
+    : v >= 6
+    ? "Good meeting, but there's room for improvement."
+    : 'Below target. Discuss what needs to change.';
 
 type Meeting = {
   id: string;
@@ -59,7 +67,7 @@ export default function MeetingPage() {
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [notes, setNotes] = useState('');
   const [cascading, setCascading] = useState('');
-  const [ratings, setRatings] = useState<Record<string, number>>({});
+  const [rating, setRating] = useState<number>(8);
   const [sectionNotes, setSectionNotes] = useState<Record<string, string>>({});
   const [currentStep, setCurrentStep] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -82,7 +90,7 @@ export default function MeetingPage() {
     setMeeting(m);
     setNotes(m?.notes ?? '');
     setCascading(m?.cascading_messages ?? '');
-    setRatings(m?.ratings ?? {});
+    setRating(Number(m?.ratings?.overall) || 8);
     setSectionNotes(m?.section_notes ?? {});
     setCurrentStep(m?.current_section ?? 0);
     setElapsed(m?.elapsed_seconds ?? 0);
@@ -115,6 +123,16 @@ export default function MeetingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionNotes]);
 
+  // Auto-save the meeting rating (debounced)
+  useEffect(() => {
+    if (!meeting) return;
+    const t = setTimeout(() => {
+      supabase.from('meetings').update({ ratings: { overall: rating } }).eq('id', meeting.id).then(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rating]);
+
   async function persistTimer(extra?: Partial<Meeting>) {
     if (!meetingRef.current) return;
     await supabase.from('meetings').update({
@@ -135,6 +153,7 @@ export default function MeetingPage() {
     if (!error && data) {
       const m = data as Meeting;
       setMeeting(m);
+      setRating(Number(m.ratings?.overall) || 8);
       setCurrentStep(m.current_section ?? 0);
       setElapsed(m.elapsed_seconds ?? 0);
       setSectionAnchor(m.elapsed_seconds ?? 0);
@@ -176,7 +195,7 @@ export default function MeetingPage() {
     const patch: Record<string, unknown> = {
       notes: notes || null,
       cascading_messages: cascading || null,
-      ratings,
+      ratings: { overall: rating },
       section_notes: sectionNotes,
       elapsed_seconds: elapsed,
       current_section: currentStep,
@@ -232,6 +251,22 @@ export default function MeetingPage() {
             </div>
           ))}
           {!issues.length && <p className="text-sm text-zinc-600">No open issues. Nice.</p>}
+        </div>
+      );
+    }
+    if (step.id === 'rating') {
+      return (
+        <div className="mt-4">
+          <label className="text-xs text-zinc-500 uppercase tracking-wide">Rate This Meeting</label>
+          <div className="flex items-center gap-4 mt-3">
+            <input
+              type="range" min={1} max={10} step={1} value={rating}
+              onChange={(e) => setRating(Number(e.target.value))}
+              className="flex-1 h-2 accent-accent cursor-pointer"
+            />
+            <span className="text-4xl font-mono text-white w-12 text-right">{rating}</span>
+          </div>
+          <p className="text-sm text-zinc-500 mt-2">{ratingCaption(rating)}</p>
         </div>
       );
     }
@@ -365,18 +400,16 @@ export default function MeetingPage() {
               <textarea className="input min-h-20" value={cascading} onChange={(e) => setCascading(e.target.value)} placeholder="What gets communicated to the wider team?" />
             </div>
             <div className="panel p-4">
-              <h3 className="font-semibold text-white mb-2 uppercase text-sm tracking-wide">Rate the Meeting (1-10)</h3>
-              {activeTeam.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 py-1">
-                  <span className="flex-1 text-sm">{t.name}</span>
-                  <input
-                    className="input !w-20"
-                    type="number" min={1} max={10}
-                    value={ratings[t.id] ?? ''}
-                    onChange={(e) => setRatings((r) => ({ ...r, [t.id]: Number(e.target.value) }))}
-                  />
-                </div>
-              ))}
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-white uppercase text-sm tracking-wide">Rate the Meeting</h3>
+                <span className="text-2xl font-mono text-white">{rating}</span>
+              </div>
+              <input
+                type="range" min={1} max={10} step={1} value={rating}
+                onChange={(e) => setRating(Number(e.target.value))}
+                className="w-full h-2 accent-accent cursor-pointer"
+              />
+              <p className="text-xs text-zinc-500 mt-2">{ratingCaption(rating)}</p>
             </div>
             <div className="flex gap-3">
               <button className="btn-ghost flex-1" onClick={() => saveProgress()}>Save Progress</button>

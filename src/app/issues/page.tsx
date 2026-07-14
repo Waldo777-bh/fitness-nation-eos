@@ -6,6 +6,7 @@ import { PageHeader, Avatar } from '@/components/ui';
 import type { Issue } from '@/lib/types';
 
 const CATEGORIES = ['membership', 'revenue', 'operations', 'team', 'other'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const PRIORITY_LABEL: Record<number, string> = { 1: 'High', 2: 'Medium', 3: 'Low' };
 const PRIORITY_STYLE: Record<number, string> = {
   1: 'bg-bad/20 text-bad',
@@ -21,6 +22,7 @@ export default function IssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showResolved, setShowResolved] = useState(true);
+  const [resolvedMonth, setResolvedMonth] = useState<number | 'all'>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
 
@@ -33,16 +35,22 @@ export default function IssuesPage() {
   function startAdd() {
     setEditingId(null);
     setDraft(emptyDraft);
-    setShowForm((s) => !s);
+    setShowForm(true);
   }
 
   function startEdit(i: Issue) {
     setEditingId(i.id);
-    setShowForm(false);
     setDraft({
       title: i.title, description: i.description ?? '', ownerId: i.owner_id ?? '',
       category: i.category ?? 'other', priority: i.priority ?? 2,
     });
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingId(null);
+    setDraft(emptyDraft);
   }
 
   async function saveDraft() {
@@ -53,12 +61,10 @@ export default function IssuesPage() {
     };
     if (editingId) {
       await supabase.from('issues').update(row).eq('id', editingId);
-      setEditingId(null);
     } else {
       await supabase.from('issues').insert({ ...row, status: 'to_discuss' });
-      setShowForm(false);
     }
-    setDraft(emptyDraft);
+    closeForm();
     load();
   }
 
@@ -80,40 +86,54 @@ export default function IssuesPage() {
   const toDiscuss = issues.filter((i) => i.status === 'to_discuss');
   const inProgress = issues.filter((i) => i.status === 'in_progress');
   const resolved = issues.filter((i) => i.status === 'resolved');
+  const resolvedShown = resolved.filter((i) => (resolvedMonth === 'all' ? true : i.resolved_at ? new Date(i.resolved_at).getMonth() === resolvedMonth : false));
 
-  // Rendered inline (a plain function, NOT a nested <Component/>) so typing
-  // never remounts the inputs and the field keeps focus.
-  const draftForm = (onCancel: () => void) => (
-    <div className="flex flex-col gap-3">
-      <input className="input" placeholder="Issue title" value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
-      <textarea className="input min-h-20" placeholder="Details (optional)" value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
-      <div className="flex gap-3 flex-wrap">
-        <select className="input !w-auto" value={draft.ownerId} onChange={(e) => setDraft((d) => ({ ...d, ownerId: e.target.value }))}>
-          <option value="">Owner</option>
-          {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        <select className="input !w-auto" value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}>
-          {CATEGORIES.map((c) => <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>)}
-        </select>
-        <select className="input !w-auto" value={draft.priority} onChange={(e) => setDraft((d) => ({ ...d, priority: Number(e.target.value) }))}>
-          <option value={1}>High</option>
-          <option value={2}>Medium</option>
-          <option value={3}>Low</option>
-        </select>
-        <button className="btn" onClick={saveDraft}><span>Save</span></button>
-        <button className="btn-ghost" onClick={onCancel}>Cancel</button>
+  // Modal add/edit form — matches the original app. Rendered inline (a plain
+  // function, NOT a nested <Component/>) so typing never remounts the inputs.
+  const draftModal = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={closeForm}>
+      <div className="panel w-full max-w-md p-6" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-white">{editingId ? 'Edit Issue' : 'Add New Issue'}</h2>
+          <button className="text-zinc-500 hover:text-white text-xl leading-none" onClick={closeForm} aria-label="Close">×</button>
+        </div>
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="text-xs text-zinc-400 uppercase tracking-wide">Title</label>
+            <input autoFocus className="input mt-1" placeholder="Enter issue title" value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 uppercase tracking-wide">Description</label>
+            <textarea className="input min-h-20 mt-1" placeholder="Describe the issue" value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 uppercase tracking-wide">Category</label>
+            <select className="input mt-1" value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}>
+              {CATEGORIES.map((c) => <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 uppercase tracking-wide">Priority</label>
+            <select className="input mt-1" value={draft.priority} onChange={(e) => setDraft((d) => ({ ...d, priority: Number(e.target.value) }))}>
+              <option value={1}>High</option>
+              <option value={2}>Medium</option>
+              <option value={3}>Low</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 uppercase tracking-wide">Assignee (Optional)</label>
+            <select className="input mt-1" value={draft.ownerId} onChange={(e) => setDraft((d) => ({ ...d, ownerId: e.target.value }))}>
+              <option value="">Select assignee</option>
+              {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <button className="btn w-full justify-center" onClick={saveDraft}><span>{editingId ? 'Save Changes' : 'Create Issue'}</span></button>
+        </div>
       </div>
     </div>
   );
 
   const issueRow = (i: Issue, actions: React.ReactNode) => {
-    if (editingId === i.id) {
-      return (
-        <div key={i.id} className="px-5 py-4 bg-accent/5">
-          {draftForm(() => setEditingId(null))}
-        </div>
-      );
-    }
     return (
       <div key={i.id} className="flex items-center gap-3 px-5 py-3 group">
         <Avatar member={team.find((t) => t.id === i.owner_id)} />
@@ -141,11 +161,7 @@ export default function IssuesPage() {
         <button className="btn" onClick={startAdd}><span>+ Add Issue</span></button>
       </PageHeader>
 
-      {showForm && (
-        <div className="panel p-5 mb-5">
-          {draftForm(() => setShowForm(false))}
-        </div>
-      )}
+      {showForm && draftModal()}
 
       <div className="panel mb-5">
         <div className="px-5 py-3 border-b border-panelBorder flex items-center gap-2">
@@ -183,16 +199,22 @@ export default function IssuesPage() {
         <div className="px-5 py-3 border-b border-panelBorder flex items-center gap-2">
           <h2 className="section-title">Resolved</h2>
           <span className="text-xs bg-good/20 text-good px-2 py-0.5 rounded-full font-bold">{resolved.length}</span>
-          <button className="btn-ghost text-xs ml-auto" onClick={() => setShowResolved((s) => !s)}>
-            {showResolved ? 'Hide' : 'Show'}
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <select className="input !w-auto !py-1 text-xs" value={resolvedMonth} onChange={(e) => setResolvedMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
+              <option value="all">All Months</option>
+              {MONTHS.map((mn, i) => <option key={mn} value={i}>{mn}</option>)}
+            </select>
+            <button className="btn-ghost text-xs" onClick={() => setShowResolved((s) => !s)}>
+              {showResolved ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </div>
         {showResolved && (
           <div className="divide-y divide-panelBorder/60">
-            {resolved.map((i) => issueRow(i, (
+            {resolvedShown.map((i) => issueRow(i, (
               <button className="btn-ghost text-xs" onClick={() => setStatus(i.id, 'to_discuss')}>Reopen</button>
             )))}
-            {!resolved.length && <p className="text-zinc-600 text-sm px-5 py-4">No resolved issues yet.</p>}
+            {!resolvedShown.length && <p className="text-zinc-600 text-sm px-5 py-4">No resolved issues{resolvedMonth === 'all' ? ' yet' : ' this month'}.</p>}
           </div>
         )}
       </div>

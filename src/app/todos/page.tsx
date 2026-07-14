@@ -1,17 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useEosCore } from '@/lib/hooks';
-import { PageHeader, Avatar } from '@/components/ui';
+import { useEosCore, usePersistedQuarter } from '@/lib/hooks';
+import { PageHeader, Avatar, QuarterPicker } from '@/components/ui';
 import type { Todo } from '@/lib/types';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export default function TodosPage() {
-  const { supabase, team, activeTeam, loading } = useEosCore();
+  const { supabase, team, activeTeam, quarters, activeQuarter, loading } = useEosCore();
+  const { quarter, setQuarterId } = usePersistedQuarter(quarters, activeQuarter);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [title, setTitle] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [due, setDue] = useState('');
   const [showDone, setShowDone] = useState(true);
+  const [monthFilter, setMonthFilter] = useState<number | 'all'>('all');
+  const [sortBy, setSortBy] = useState<'due' | 'person' | 'title' | 'status'>('due');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ title: string; ownerId: string; due: string }>({ title: '', ownerId: '', due: '' });
 
@@ -60,6 +65,59 @@ export default function TodosPage() {
   const done = todos.filter((t) => t.done);
   const pct = todos.length ? Math.round((done.length / todos.length) * 100) : 0;
   const today = new Date().toISOString().slice(0, 10);
+  const teamName = (id: string | null) => team.find((m) => m.id === id)?.name ?? '';
+
+  // Apply the month filter + sort (matches the old app's controls)
+  const displayedOpen = open
+    .filter((t) => (monthFilter === 'all' ? true : t.due_date ? new Date(t.due_date + 'T00:00:00').getMonth() === monthFilter : false))
+    .sort((a, b) => {
+      if (sortBy === 'title') return a.title.localeCompare(b.title);
+      if (sortBy === 'person') return teamName(a.owner_id).localeCompare(teamName(b.owner_id));
+      if (sortBy === 'status') {
+        const rank = (t: Todo) => (!t.due_date ? 2 : t.due_date < today ? 0 : 1); // overdue first
+        return rank(a) - rank(b);
+      }
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return a.due_date.localeCompare(b.due_date);
+    });
+
+  // Quarterly calendar — render each month the quarter spans, today highlighted
+  const monthsInQuarter: Date[] = (() => {
+    if (!quarter) return [];
+    const s = new Date(quarter.start_date + 'T00:00:00');
+    const e = new Date(quarter.end_date + 'T00:00:00');
+    const out: Date[] = [];
+    let d = new Date(s.getFullYear(), s.getMonth(), 1);
+    while (d <= e) { out.push(new Date(d)); d = new Date(d.getFullYear(), d.getMonth() + 1, 1); }
+    return out;
+  })();
+
+  const monthGrid = (m: Date) => {
+    const year = m.getFullYear();
+    const mon = m.getMonth();
+    const first = new Date(year, mon, 1).getDay();
+    const days = new Date(year, mon + 1, 0).getDate();
+    const cells: (number | null)[] = [];
+    for (let i = 0; i < first; i++) cells.push(null);
+    for (let d = 1; d <= days; d++) cells.push(d);
+    const iso = (d: number) => `${year}-${String(mon + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return (
+      <div key={`${year}-${mon}`} className="flex-1 min-w-52">
+        <div className="text-center text-sm text-zinc-300 font-semibold mb-2">{m.toLocaleDateString('en-AU', { month: 'long' })}</div>
+        <div className="grid grid-cols-7 text-[10px] text-zinc-600 mb-1">
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => <div key={i} className="text-center">{w}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-y-1">
+          {cells.map((d, i) => (
+            <div key={i} className="text-center text-xs">
+              {d && <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${iso(d) === today ? 'bg-accent text-white font-bold' : 'text-zinc-400'}`}>{d}</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   // Inline function (not a nested <Component/>) so the edit input keeps focus while typing.
   const row = (t: Todo) => {
@@ -95,7 +153,19 @@ export default function TodosPage() {
 
   return (
     <>
-      <PageHeader title="To-Dos" subtitle="Weekly action items" />
+      <PageHeader title="To-Dos" subtitle="Weekly action items">
+        <QuarterPicker quarters={quarters} value={quarter?.id} onChange={(id) => setQuarterId(id)} />
+      </PageHeader>
+
+      {!!monthsInQuarter.length && (
+        <div className="panel p-4 mb-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="section-title">Quarterly Calendar</h2>
+            <span className="text-xs text-zinc-500">{quarter?.label}</span>
+          </div>
+          <div className="flex gap-6 flex-wrap">{monthsInQuarter.map(monthGrid)}</div>
+        </div>
+      )}
 
       <div className="panel p-4 mb-5 flex gap-3 flex-wrap">
         <input className="input flex-1 min-w-48" placeholder="New to-do..." value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTodo()} />
@@ -110,13 +180,25 @@ export default function TodosPage() {
       <div className="grid md:grid-cols-[1fr_300px] gap-5">
         <div className="flex flex-col gap-5">
           <div className="panel">
-            <div className="px-5 py-3 border-b border-panelBorder flex items-center gap-2">
+            <div className="px-5 py-3 border-b border-panelBorder flex items-center gap-2 flex-wrap">
               <h2 className="section-title">Pending To-Dos</h2>
               <span className="text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full font-bold">{open.length} remaining</span>
+              <div className="ml-auto flex gap-2">
+                <select className="input !w-auto !py-1 text-xs" value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
+                  <option value="all">All Months</option>
+                  {MONTHS.map((mn, i) => <option key={mn} value={i}>{mn}</option>)}
+                </select>
+                <select className="input !w-auto !py-1 text-xs" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'due' | 'person' | 'title' | 'status')}>
+                  <option value="due">Due Date</option>
+                  <option value="person">Person</option>
+                  <option value="title">Title</option>
+                  <option value="status">Status</option>
+                </select>
+              </div>
             </div>
             <div className="divide-y divide-panelBorder/60">
-              {open.map((t) => row(t))}
-              {!open.length && <p className="text-zinc-600 text-sm px-5 py-4">All clear.</p>}
+              {displayedOpen.map((t) => row(t))}
+              {!displayedOpen.length && <p className="text-zinc-600 text-sm px-5 py-4">All clear.</p>}
             </div>
           </div>
 
