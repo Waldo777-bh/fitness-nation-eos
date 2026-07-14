@@ -145,7 +145,7 @@ export default function TodosPage() {
           </div>
           <div className="panel p-5">
             <h2 className="font-semibold text-white uppercase text-sm tracking-wide mb-3">By Team Member</h2>
-            {team.map((t) => {
+            {activeTeam.map((t) => {
               const mine = todos.filter((x) => x.owner_id === t.id);
               if (!mine.length) return null;
               const mineDone = mine.filter((x) => x.done).length;

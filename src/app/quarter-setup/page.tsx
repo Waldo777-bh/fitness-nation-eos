@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useEosCore, useQuarterTargets, usePersistedQuarter } from '@/lib/hooks';
-import { CATEGORY_LABELS, generateWeeklyTargets, weekStartFor, formatValue } from '@/lib/metrics';
-import { PageHeader, QuarterPicker, Avatar } from '@/components/ui';
+import { CATEGORY_LABELS, generateWeeklyTargets, weekStartFor, formatValue, computeDerived } from '@/lib/metrics';
+import { PageHeader, QuarterPicker } from '@/components/ui';
 
 const PREVIEW_KEYS = ['dd_members', 'dd_revenue', 'avg_weekly_fee', 'new_dd_sales', 'shake_sales'];
 
@@ -18,6 +18,17 @@ export default function QuarterSetupPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    const f: Record<string, { start: string; target: string }> = {};
+    for (const t of targets) {
+      f[t.metric_id] = {
+        start: t.start_value === null ? '' : String(t.start_value),
+        target: t.target_value === null ? '' : String(t.target_value),
+      };
+    }
+    setForm(f);
+  }, [targets]);
+
+  useEffect(() => {
     const o: Record<string, string> = {};
     for (const m of metrics) o[m.id] = m.owner_id ?? '';
     setOwners(o);
@@ -29,24 +40,34 @@ export default function QuarterSetupPage() {
     if (error) setMsg(`Error saving owner: ${error.message}`);
   }
 
-  useEffect(() => {
-    const f: Record<string, { start: string; target: string }> = {};
-    for (const t of targets) {
-      f[t.metric_id] = {
-        start: t.start_value === null ? '' : String(t.start_value),
-        target: t.target_value === null ? '' : String(t.target_value),
-      };
-    }
-    setForm(f);
-  }, [targets]);
-
   const teamById = useMemo(() => new Map(team.map((t) => [t.id, t])), [team]);
   const planExists = targets.length > 0;
 
-  const growthLabel = (m: { id: string; unit: string }) => {
-    const f = form[m.id];
-    if (!f || f.start === '' || f.target === '') return null;
-    const diff = Number(f.target) - Number(f.start);
+  // Live-computed start/target for auto metrics, derived from the manual inputs
+  const { derivedStart, derivedTarget } = useMemo(() => {
+    const s: Record<string, number | null> = {};
+    const t: Record<string, number | null> = {};
+    for (const m of metrics) {
+      if (m.is_auto) continue;
+      const f = form[m.id];
+      s[m.key] = f && f.start !== '' ? Number(f.start) : null;
+      t[m.key] = f && f.target !== '' ? Number(f.target) : null;
+    }
+    return { derivedStart: computeDerived(s), derivedTarget: computeDerived(t) };
+  }, [form, metrics]);
+
+  const growthLabel = (m: { id: string; key: string; unit: string; is_auto: boolean }) => {
+    let s: number | null, t: number | null;
+    if (m.is_auto) {
+      s = derivedStart[m.key] ?? null;
+      t = derivedTarget[m.key] ?? null;
+    } else {
+      const f = form[m.id];
+      if (!f || f.start === '' || f.target === '') return null;
+      s = Number(f.start); t = Number(f.target);
+    }
+    if (s === null || t === null) return null;
+    const diff = t - s;
     const sign = diff >= 0 ? '+' : '';
     return `${sign}${m.unit === 'currency' ? '$' : ''}${Number(diff.toFixed(2)).toLocaleString('en-AU')}${m.unit === 'percent' ? '%' : ''} growth`;
   };
@@ -54,34 +75,53 @@ export default function QuarterSetupPage() {
   async function save() {
     if (!quarter) return;
     setSaving(true);
-    let saved = 0;
-    for (const m of metrics) {
+    setMsg(null);
+
+    // Weekly target matrix for manual metrics
+    const weekMatrix: Record<string, number[]> = {};
+    for (const m of metrics.filter((x) => !x.is_auto)) {
       const f = form[m.id];
       if (!f || f.start === '' || f.target === '') continue;
-      const start = Number(f.start);
-      const target = Number(f.target);
-
-      const { error } = await supabase.from('quarter_targets').upsert(
-        { quarter_id: quarter.id, metric_id: m.id, start_value: start, target_value: target },
-        { onConflict: 'quarter_id,metric_id' }
-      );
-      if (error) { setMsg(`Error: ${error.message}`); setSaving(false); return; }
-
-      const weekly = generateWeeklyTargets(start, target, quarter.weeks);
-      for (let w = 1; w <= quarter.weeks; w++) {
-        const { error: e2 } = await supabase.from('weekly_entries').upsert(
-          {
-            quarter_id: quarter.id, metric_id: m.id, week_number: w,
-            week_start: weekStartFor(quarter.start_date, w), target: weekly[w - 1],
-          },
-          { onConflict: 'metric_id,week_start' }
-        );
-        if (e2) { setMsg(`Error: ${e2.message}`); setSaving(false); return; }
-      }
-      saved++;
+      weekMatrix[m.key] = generateWeeklyTargets(Number(f.start), Number(f.target), quarter.weeks);
     }
+
+    // Derived weekly targets for auto metrics, computed per week from the manual matrix
+    const autoMatrix: Record<string, Array<number | null>> = {};
+    for (let w = 0; w < quarter.weeks; w++) {
+      const keyed: Record<string, number | null> = {};
+      for (const [key, arr] of Object.entries(weekMatrix)) keyed[key] = arr[w];
+      const d = computeDerived(keyed);
+      for (const m of metrics.filter((x) => x.is_auto)) {
+        (autoMatrix[m.key] ??= [])[w] = d[m.key] !== undefined && d[m.key] !== null ? Number(d[m.key]!.toFixed(2)) : null;
+      }
+    }
+
+    const qtRows: Array<Record<string, unknown>> = [];
+    const weRows: Array<Record<string, unknown>> = [];
+    for (const m of metrics) {
+      const weekly = m.is_auto ? autoMatrix[m.key] : weekMatrix[m.key];
+      if (!weekly || weekly.every((v) => v === null || v === undefined)) continue;
+      const start = weekly[0];
+      const target = weekly[quarter.weeks - 1];
+      qtRows.push({ quarter_id: quarter.id, metric_id: m.id, start_value: start, target_value: target });
+      for (let w = 1; w <= quarter.weeks; w++) {
+        if (weekly[w - 1] === null || weekly[w - 1] === undefined) continue;
+        weRows.push({
+          quarter_id: quarter.id, metric_id: m.id, week_number: w,
+          week_start: weekStartFor(quarter.start_date, w), target: weekly[w - 1],
+        });
+      }
+    }
+
+    const { error: e1 } = await supabase.from('quarter_targets').upsert(qtRows, { onConflict: 'quarter_id,metric_id' });
+    if (e1) { setMsg(`Error: ${e1.message}`); setSaving(false); return; }
+    for (let i = 0; i < weRows.length; i += 200) {
+      const { error: e2 } = await supabase.from('weekly_entries').upsert(weRows.slice(i, i + 200), { onConflict: 'metric_id,week_start' });
+      if (e2) { setMsg(`Error: ${e2.message}`); setSaving(false); return; }
+    }
+
     setSaving(false);
-    setMsg(`Saved targets for ${saved} metrics - weekly targets auto-generated`);
+    setMsg(`Saved ${qtRows.length} metrics (${weRows.length} weekly targets, auto metrics computed automatically)`);
     refresh();
     setTimeout(() => setMsg(null), 5000);
   }
@@ -94,7 +134,7 @@ export default function QuarterSetupPage() {
 
   return (
     <>
-      <PageHeader title="Quarter Setup" subtitle="Set quarterly targets and auto-generate weekly goals">
+      <PageHeader title="Quarter Setup" subtitle="Set quarterly targets - weekly goals and auto metrics calculate themselves">
         {planExists && <span className="text-[10px] px-2 py-1 rounded bg-good/20 text-good font-bold uppercase">Plan Exists</span>}
         <QuarterPicker quarters={quarters} value={quarter?.id} onChange={setQuarterId} />
       </PageHeader>
@@ -137,20 +177,33 @@ export default function QuarterSetupPage() {
                     {!activeTeam.some((t) => t.id === owners[m.id]) && owners[m.id] &&
                       <option value={owners[m.id]}>{teamById.get(owners[m.id])?.name ?? 'Former member'}</option>}
                   </select>
-                  <input
-                    className="input !w-28"
-                    placeholder="Start"
-                    type="number" step="any"
-                    value={form[m.id]?.start ?? ''}
-                    onChange={(e) => setForm((f) => ({ ...f, [m.id]: { start: e.target.value, target: f[m.id]?.target ?? '' } }))}
-                  />
-                  <input
-                    className="input !w-28"
-                    placeholder="Target"
-                    type="number" step="any"
-                    value={form[m.id]?.target ?? ''}
-                    onChange={(e) => setForm((f) => ({ ...f, [m.id]: { start: f[m.id]?.start ?? '', target: e.target.value } }))}
-                  />
+                  {m.is_auto ? (
+                    <>
+                      <div className="input !w-28 !py-2 text-zinc-300 bg-panel cursor-not-allowed truncate" title="Calculated automatically">
+                        {formatValue(derivedStart[m.key] ?? null, m.unit)}
+                      </div>
+                      <div className="input !w-28 !py-2 text-zinc-300 bg-panel cursor-not-allowed truncate" title="Calculated automatically">
+                        {formatValue(derivedTarget[m.key] ?? null, m.unit)}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className="input !w-28"
+                        placeholder="Start"
+                        type="number" step="any"
+                        value={form[m.id]?.start ?? ''}
+                        onChange={(e) => setForm((f) => ({ ...f, [m.id]: { start: e.target.value, target: f[m.id]?.target ?? '' } }))}
+                      />
+                      <input
+                        className="input !w-28"
+                        placeholder="Target"
+                        type="number" step="any"
+                        value={form[m.id]?.target ?? ''}
+                        onChange={(e) => setForm((f) => ({ ...f, [m.id]: { start: f[m.id]?.start ?? '', target: e.target.value } }))}
+                      />
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -190,9 +243,6 @@ export default function QuarterSetupPage() {
               })}
             </tbody>
           </table>
-          {!previewMetrics.some((m) => m && form[m.id]?.start !== '' && form[m.id]?.start !== undefined && form[m.id]?.target !== '') && (
-            <p className="text-zinc-600 text-sm">Enter start and target values above to preview weekly progression.</p>
-          )}
         </div>
       )}
 

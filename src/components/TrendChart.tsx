@@ -6,6 +6,7 @@ export type Series = {
   dashed?: boolean;          // targets are dashed, actuals solid
   axis?: 'left' | 'right';
   points: Array<number | null>; // index = week - 1
+  start?: number | null;     // quarter starting value - anchors the line at the 'S' slot
 };
 
 function niceMax(v: number) {
@@ -28,15 +29,20 @@ export default function TrendChart({
   const H = 260;
   const pad = { l: 56, r: 56, t: 12, b: 34 };
 
+  const hasStart = series.some((s) => s.start !== undefined && s.start !== null);
+  const slots = weeks + (hasStart ? 1 : 0);
+  const seriesPoints = (s: Series): Array<number | null> =>
+    hasStart ? [s.start ?? null, ...s.points.slice(0, weeks)] : s.points.slice(0, weeks);
+
   const axisMax = (axis: 'left' | 'right') => {
-    const vals = series.filter((s) => (s.axis ?? 'left') === axis).flatMap((s) => s.points).filter((p): p is number => p !== null);
+    const vals = series.filter((s) => (s.axis ?? 'left') === axis).flatMap(seriesPoints).filter((p): p is number => p !== null);
     return niceMax(Math.max(...(vals.length ? vals : [1])) * 1.1);
   };
   const maxL = axisMax('left');
   const maxR = axisMax('right');
   const hasRight = series.some((s) => s.axis === 'right');
 
-  const x = (i: number) => pad.l + (i / Math.max(weeks - 1, 1)) * (W - pad.l - pad.r);
+  const x = (i: number) => pad.l + (i / Math.max(slots - 1, 1)) * (W - pad.l - pad.r);
   const y = (v: number, axis: 'left' | 'right') =>
     H - pad.b - (v / (axis === 'left' ? maxL : maxR)) * (H - pad.t - pad.b);
 
@@ -55,13 +61,15 @@ export default function TrendChart({
             )}
           </g>
         ))}
-        {Array.from({ length: weeks }, (_, i) => (
-          <text key={i} x={x(i)} y={H - pad.b + 18} fill="#71717a" fontSize="11" textAnchor="middle">W{i + 1}</text>
+        {Array.from({ length: slots }, (_, i) => (
+          <text key={i} x={x(i)} y={H - pad.b + 18} fill="#71717a" fontSize="11" textAnchor="middle">
+            {hasStart ? (i === 0 ? 'S' : `W${i}`) : `W${i + 1}`}
+          </text>
         ))}
         {series.map((s) => {
           let d = '';
           const dots: Array<{ px: number; py: number }> = [];
-          s.points.slice(0, weeks).forEach((p, i) => {
+          seriesPoints(s).forEach((p, i) => {
             if (p === null || p === undefined) return;
             const px = x(i);
             const py = y(p, s.axis ?? 'left');

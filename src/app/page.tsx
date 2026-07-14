@@ -30,7 +30,7 @@ const MEM_SERIES: Array<{ key: string; label: string; color: string; axis: 'left
 ];
 
 export default function DashboardPage() {
-  const { supabase, quarters, metrics, team, activeQuarter, loading } = useEosCore();
+  const { supabase, quarters, metrics, team, activeTeam, activeQuarter, loading } = useEosCore();
   const { quarter, setQuarterId } = usePersistedQuarter(quarters, activeQuarter);
   const [week, setWeek] = useState<number | null>(null);
   const { entries } = useWeeklyEntries(quarter?.id);
@@ -80,9 +80,11 @@ export default function DashboardPage() {
           const v = r?.[field];
           return v === null || v === undefined ? null : Number(v);
         });
+      const sv = startByMetric.get(metric.id);
+      const start = sv === null || sv === undefined ? null : Number(sv);
       return [
-        { label: `${d.label} Target`, color: d.color, dashed: true, axis: d.axis, points: byWeek('target') },
-        { label: `${d.label} Actual`, color: d.color, axis: d.axis, points: byWeek('actual') },
+        { label: `${d.label} Target`, color: d.color, dashed: true, axis: d.axis, points: byWeek('target'), start },
+        { label: `${d.label} Actual`, color: d.color, axis: d.axis, points: byWeek('actual'), start },
       ];
     });
 
@@ -168,7 +170,7 @@ export default function DashboardPage() {
             <Link href="/issues" className="text-xs text-accent">View →</Link>
           </div>
           <div className="text-2xl font-bold text-white mb-2">{issues.length} <span className="text-zinc-500 text-base font-normal">open</span></div>
-          {team.map((t) => {
+          {activeTeam.map((t) => {
             const mine = issues.filter((i) => i.owner_id === t.id).length;
             return (
               <div key={t.id} className="flex items-center gap-2 py-1 text-sm">
@@ -184,7 +186,7 @@ export default function DashboardPage() {
             <Link href="/todos" className="text-xs text-accent">View →</Link>
           </div>
           <div className="text-2xl font-bold text-white mb-2">{openTodos.length} <span className="text-zinc-500 text-base font-normal">outstanding</span></div>
-          {team.map((t) => {
+          {activeTeam.map((t) => {
             const mine = todos.filter((x) => x.owner_id === t.id);
             if (!mine.length) return null;
             const done = mine.filter((x) => x.done).length;

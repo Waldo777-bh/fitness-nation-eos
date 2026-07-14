@@ -167,7 +167,11 @@ export default function WeeklyUpdatePage() {
                 <div key={m.id}>
                   <label className="text-xs text-zinc-400 flex items-center justify-between mb-1">
                     <span>{m.name} <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-panelBorder text-zinc-500">AUTO</span></span>
-                    <span>Target: {formatValue(targetFor(m.id), m.unit)}</span>
+                    <span className="flex items-center gap-1.5">
+                      Target: {formatValue(targetFor(m.id), m.unit)}
+                      {derived[m.key] !== null && derived[m.key] !== undefined &&
+                        pctChip(m, String(derived[m.key]))}
+                    </span>
                   </label>
                   <div className="input bg-panel text-zinc-300 cursor-not-allowed">
                     {derived[m.key] === null || derived[m.key] === undefined ? '– calculated on save' : formatValue(derived[m.key], m.unit)}

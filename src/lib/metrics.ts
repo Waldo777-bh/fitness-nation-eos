@@ -48,14 +48,15 @@ export function computeDerived(values: Record<string, number | null>): Record<st
   const ddMembers = v('dd_members');
   out.avg_weekly_fee = ddRev !== null && ddMembers ? ddRev / ddMembers : null;
 
-  out.monthly_churn = cans !== null && ddMembers ? ((cans * 4.33) / ddMembers) * 100 : null;
+  // Weekly churn - these are weekly numbers
+  out.monthly_churn = cans !== null && ddMembers ? (cans / ddMembers) * 100 : null;
 
   const totalMembers = (ddMembers ?? 0) + (v('pif_members') ?? 0);
   out.arpm = out.total_revenue !== null && totalMembers > 0 ? out.total_revenue / totalMembers : null;
 
   out.ltv =
     out.arpm !== null && out.monthly_churn && out.monthly_churn > 0
-      ? (out.arpm * 4.33) / (out.monthly_churn / 100)
+      ? out.arpm / (out.monthly_churn / 100)
       : null;
 
   return out;
