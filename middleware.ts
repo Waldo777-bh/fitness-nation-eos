@@ -1,41 +1,26 @@
-import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { AUTH_COOKIE, AUTH_TOKEN } from '@/lib/auth';
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  const { data: { user } } = await supabase.auth.getUser();
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
 
   const isPublic =
-    request.nextUrl.pathname.startsWith('/login') ||
-    request.nextUrl.pathname.startsWith('/api/ingest') ||
-    request.nextUrl.pathname.startsWith('/api/sync');
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/ingest') ||
+    pathname.startsWith('/api/sync');
 
-  if (!user && !isPublic) {
+  if (isPublic) return NextResponse.next();
+
+  const token = request.cookies.get(AUTH_COOKIE)?.value;
+  if (token !== AUTH_TOKEN) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
+    url.search = '';
     return NextResponse.redirect(url);
   }
-  return response;
+
+  return NextResponse.next();
 }
 
 export const config = {

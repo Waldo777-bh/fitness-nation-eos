@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 
 const links = [
   { href: '/', label: 'Dashboard' },
@@ -22,8 +21,9 @@ export default function Sidebar() {
   if (pathname === '/login') return null;
 
   async function signOut() {
-    await createClient().auth.signOut();
+    await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
+    router.refresh();
   }
 
   return (

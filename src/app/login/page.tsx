@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,13 +14,23 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) setError(error.message);
-    else {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? 'Incorrect email or password');
+        setLoading(false);
+        return;
+      }
       router.push('/');
       router.refresh();
+    } catch {
+      setError('Something went wrong. Please try again.');
+      setLoading(false);
     }
   }
 
@@ -43,7 +52,7 @@ export default function LoginPage() {
         <input className="input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <input className="input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         {error && <p className="text-sm text-bad">{error}</p>}
-        <button className="btn" disabled={loading}><span>{loading ? 'Signing in…' : 'Sign in'}</span></button>
+        <button className="btn" disabled={loading}><span>{loading ? 'Signing in...' : 'Sign in'}</span></button>
       </form>
     </div>
   );
