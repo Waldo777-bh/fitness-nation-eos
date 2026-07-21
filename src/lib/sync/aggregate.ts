@@ -1,8 +1,23 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { computeDerived, weekStartFor, currentWeekNumber } from '@/lib/metrics';
 
+type AggregateOptions = {
+  /**
+   * When true, never overwrite a weekly_entries row that was last set by hand
+   * (source = 'manual'). Used by the user-triggered "Sync now" so a deliberate
+   * click can pull feed data without destroying anything typed in manually.
+   * The hourly cron leaves this false to keep its existing behaviour.
+   */
+  protectManual?: boolean;
+};
+
 /** Map raw source_events into weekly actuals, then recompute derived metrics. */
-export async function aggregateEventsIntoWeeklies(supabase: SupabaseClient) {
+export async function aggregateEventsIntoWeeklies(
+  supabase: SupabaseClient,
+  opts: AggregateOptions = {}
+) {
+  const protectManual = opts.protectManual ?? false;
+
   // Find active quarter
   const today = new Date().toISOString().slice(0, 10);
   const { data: quarter } = await supabase
@@ -11,15 +26,32 @@ export async function aggregateEventsIntoWeeklies(supabase: SupabaseClient) {
     .lte('start_date', today)
     .gte('end_date', today)
     .single();
-  if (!quarter) return { message: 'no active quarter' };
+  if (!quarter) return { message: 'no active quarter', rows: 0, protectedManual: 0 };
 
   const week = currentWeekNumber(quarter.start_date, quarter.weeks);
   const weekStart = weekStartFor(quarter.start_date, week);
   const weekEnd = weekStartFor(quarter.start_date, week + 1);
 
   const { data: metrics } = await supabase.from('metrics').select('*');
-  if (!metrics) return { message: 'no metrics' };
+  if (!metrics) return { message: 'no metrics', rows: 0, protectedManual: 0 };
   const byKey = new Map(metrics.map((m) => [m.key, m]));
+
+  // Which metrics for this week were last set by hand - protect them if asked.
+  const { data: existingRows } = await supabase
+    .from('weekly_entries')
+    .select('metric_id, source')
+    .eq('week_start', weekStart);
+  const manualMetricIds = new Set(
+    (existingRows ?? []).filter((r) => r.source === 'manual').map((r) => r.metric_id)
+  );
+  let protectedManual = 0;
+  const isProtected = (metricId: string) => {
+    if (protectManual && manualMetricIds.has(metricId)) {
+      protectedManual++;
+      return true;
+    }
+    return false;
+  };
 
   // Count events in current week
   const countFor = async (types: string[]) => {
@@ -63,6 +95,7 @@ export async function aggregateEventsIntoWeeklies(supabase: SupabaseClient) {
     if (!metric) continue;
     // Only write event-counted metrics if there is at least one event, so manual entry isn't clobbered by zeros.
     if (key in eventCounts && !(key in directValues) && value === 0) continue;
+    if (isProtected(metric.id)) continue;
     await supabase.from('weekly_entries').upsert(
       {
         quarter_id: quarter.id,
@@ -92,6 +125,7 @@ export async function aggregateEventsIntoWeeklies(supabase: SupabaseClient) {
   for (const [key, value] of Object.entries(derived)) {
     const metric = byKey.get(key);
     if (!metric || value === null) continue;
+    if (isProtected(metric.id)) continue;
     await supabase.from('weekly_entries').upsert(
       {
         quarter_id: quarter.id,
@@ -106,5 +140,6 @@ export async function aggregateEventsIntoWeeklies(supabase: SupabaseClient) {
     rows++;
   }
 
-  return { message: `week ${week}: ${rows} entries updated`, rows };
+  const suffix = protectManual && protectedManual ? `, ${protectedManual} manual value(s) preserved` : '';
+  return { message: `week ${week}: ${rows} entries updated${suffix}`, rows, protectedManual };
 }

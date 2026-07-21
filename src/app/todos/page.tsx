@@ -19,6 +19,7 @@ export default function TodosPage() {
   const [sortBy, setSortBy] = useState<'due' | 'person' | 'title' | 'status'>('due');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ title: string; ownerId: string; due: string }>({ title: '', ownerId: '', due: '' });
+  const [formMsg, setFormMsg] = useState<string | null>(null);
 
   async function load() {
     const { data } = await supabase.from('todos').select('*').order('done').order('due_date', { ascending: true, nullsFirst: false });
@@ -27,10 +28,13 @@ export default function TodosPage() {
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [supabase]);
 
   async function addTodo() {
-    if (!title.trim()) return;
-    await supabase.from('todos').insert({ title, owner_id: ownerId || null, due_date: due || null });
+    const t = title.trim();
+    if (!t) { setFormMsg('Enter a to-do title first.'); return; }
+    const { error } = await supabase.from('todos').insert({ title: t, owner_id: ownerId || null, due_date: due || null });
+    if (error) { setFormMsg(`Could not add to-do: ${error.message}`); return; }
     setTitle(''); setOwnerId(''); setDue('');
-    load();
+    setFormMsg(null);
+    await load();
   }
 
   function startEdit(t: Todo) {
@@ -167,14 +171,17 @@ export default function TodosPage() {
         </div>
       )}
 
-      <div className="panel p-4 mb-5 flex gap-3 flex-wrap">
-        <input className="input flex-1 min-w-48" placeholder="New to-do..." value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTodo()} />
-        <select className="input !w-auto" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-          <option value="">Owner</option>
-          {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        <input className="input !w-auto" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
-        <button className="btn" onClick={addTodo}><span>Add</span></button>
+      <div className="panel p-4 mb-5">
+        <div className="flex gap-3 flex-wrap">
+          <input className="input flex-1 min-w-48" placeholder="New to-do..." value={title} onChange={(e) => { setTitle(e.target.value); if (formMsg) setFormMsg(null); }} onKeyDown={(e) => e.key === 'Enter' && addTodo()} />
+          <select className="input !w-auto" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+            <option value="">Owner</option>
+            {activeTeam.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <input className="input !w-auto" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+          <button className="btn" onClick={addTodo}><span>Add</span></button>
+        </div>
+        {formMsg && <p className="text-sm text-bad mt-2">{formMsg}</p>}
       </div>
 
       <div className="grid md:grid-cols-[1fr_300px] gap-5">

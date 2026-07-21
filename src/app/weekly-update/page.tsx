@@ -17,6 +17,8 @@ export default function WeeklyUpdatePage() {
   const [targetValues, setTargetValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const weekEntries = useMemo(() => entries.filter((e) => e.week_number === weekNum), [entries, weekNum]);
 
@@ -108,6 +110,31 @@ export default function WeeklyUpdatePage() {
     setTimeout(() => setSavedMsg(null), 4000);
   }
 
+  // "Sync now" - pull the latest from connected feeds and re-aggregate the
+  // current week server-side, then reload the fields. Never overwrites values
+  // entered by hand (see /api/refresh + aggregate protectManual).
+  async function syncNow() {
+    setSyncing(true);
+    setSyncMsg('Pulling from feeds and recomputing this week…');
+    try {
+      const res = await fetch('/api/refresh', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        setSyncMsg(`Sync failed: ${data.error ?? res.statusText}`);
+      } else {
+        const r = (data.results ?? {}) as Record<string, string>;
+        setSyncMsg(
+          `Synced — ${r.aggregate ?? 'done'}. Feeds → GymSales: ${r.gymsales ?? 'n/a'} · ClubFit: ${r.clubfit ?? 'n/a'} · Google: ${r.google ?? 'n/a'}.`
+        );
+        refresh();
+      }
+    } catch (e) {
+      setSyncMsg(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   if (loading) return <p className="text-zinc-500">Loading…</p>;
 
   const categories = ['membership', 'revenue', 'operations', 'growth'] as const;
@@ -119,13 +146,24 @@ export default function WeeklyUpdatePage() {
         <QuarterPicker quarters={quarters} value={quarter?.id} onChange={(id) => { setQuarterId(id); setWeek(null); }} />
       </PageHeader>
 
-      <div className="flex gap-2 mb-5">
-        <button className={tab === 'actuals' ? 'btn' : 'btn-ghost'} onClick={() => setTab('actuals')}>
-          <span>Update Actuals</span>
-        </button>
-        <button className={tab === 'targets' ? 'btn' : 'btn-ghost'} onClick={() => setTab('targets')}>
-          <span>Set Targets</span>
-        </button>
+      <div className="mb-5">
+        <div className="flex gap-2 items-center flex-wrap">
+          <button className={tab === 'actuals' ? 'btn' : 'btn-ghost'} onClick={() => setTab('actuals')}>
+            <span>Update Actuals</span>
+          </button>
+          <button className={tab === 'targets' ? 'btn' : 'btn-ghost'} onClick={() => setTab('targets')}>
+            <span>Set Targets</span>
+          </button>
+          <button
+            className="btn-ghost ml-auto"
+            onClick={syncNow}
+            disabled={syncing}
+            title="Pull the latest from connected feeds (GymSales, Google, ClubFit) and recompute this week's actuals. Values you've typed in by hand are preserved."
+          >
+            <span>{syncing ? 'Syncing…' : '⟳ Sync actuals from feeds'}</span>
+          </button>
+        </div>
+        {syncMsg && <p className="text-sm text-zinc-400 mt-2">{syncMsg}</p>}
       </div>
 
       {categories.map((cat) => {

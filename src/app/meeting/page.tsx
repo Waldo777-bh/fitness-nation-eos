@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useEosCore, defaultWeek, usePersistedQuarter } from '@/lib/hooks';
 import { PageHeader, QuarterPicker, WeekPicker, Avatar } from '@/components/ui';
@@ -42,6 +42,8 @@ type Meeting = {
   section_notes: Record<string, string>;
   elapsed_seconds: number;
   current_section: number;
+  timer_started_at: string | null;
+  section_start_seconds: number;
 };
 
 const fmtClock = (secs: number) => {
@@ -70,17 +72,23 @@ export default function MeetingPage() {
   const [rating, setRating] = useState<number>(8);
   const [sectionNotes, setSectionNotes] = useState<Record<string, string>>({});
   const [currentStep, setCurrentStep] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [sectionAnchor, setSectionAnchor] = useState(0); // elapsed value when current section was entered
+
+  // Wall-clock timer model. baseElapsed = seconds banked while paused;
+  // timerStartedAt = epoch ms of the current run (null when paused/stopped).
+  // Live elapsed is DERIVED from these, so leaving the page and coming back
+  // never pauses or loses time - the clock only stops on Pause or Complete.
+  const [baseElapsed, setBaseElapsed] = useState(0);
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
+  const [sectionStart, setSectionStart] = useState(0); // elapsed mark when the current section began
+  const [nowTick, setNowTick] = useState<number>(() => Date.now()); // bumped each second to re-render the clock
   const [msg, setMsg] = useState<string | null>(null);
 
   const [rocks, setRocks] = useState<Rock[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
 
-  const meetingRef = useRef<Meeting | null>(null);
-  meetingRef.current = meeting;
+  const running = timerStartedAt !== null;
+  const elapsed = baseElapsed + (timerStartedAt !== null ? Math.max(0, Math.floor((nowTick - timerStartedAt) / 1000)) : 0);
 
   async function load() {
     if (!quarter) return;
@@ -93,9 +101,15 @@ export default function MeetingPage() {
     setRating(Number(m?.ratings?.overall) || 8);
     setSectionNotes(m?.section_notes ?? {});
     setCurrentStep(m?.current_section ?? 0);
-    setElapsed(m?.elapsed_seconds ?? 0);
-    setSectionAnchor(m?.elapsed_seconds ?? 0);
-    setRunning(false);
+    setBaseElapsed(m?.elapsed_seconds ?? 0);
+    setSectionStart(m?.section_start_seconds ?? 0);
+    // Resume the clock from its persisted start time so it survives navigation.
+    // A completed meeting is never running.
+    const startedAt = m?.timer_started_at && m.status !== 'completed'
+      ? new Date(m.timer_started_at).getTime()
+      : null;
+    setTimerStartedAt(startedAt);
+    setNowTick(Date.now());
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [supabase, quarter?.id, weekNum]);
 
@@ -106,12 +120,14 @@ export default function MeetingPage() {
     supabase.from('todos').select('*').order('done').order('due_date', { ascending: true, nullsFirst: false }).then(({ data }) => setTodos((data as Todo[]) ?? []));
   }, [supabase, quarter]);
 
-  // Ticking clock
+  // Re-render the running clock once a second. Elapsed is computed from
+  // wall-clock time, so a throttled/backgrounded tab still shows the right value.
   useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => setElapsed((e) => e + 1), 1000);
+    if (timerStartedAt === null) return;
+    setNowTick(Date.now());
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [running]);
+  }, [timerStartedAt]);
 
   // Auto-save per-section notes (debounced)
   useEffect(() => {
@@ -133,20 +149,15 @@ export default function MeetingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rating]);
 
-  async function persistTimer(extra?: Partial<Meeting>) {
-    if (!meetingRef.current) return;
-    await supabase.from('meetings').update({
-      elapsed_seconds: elapsed, current_section: currentStep, ...extra,
-    }).eq('id', meetingRef.current.id);
-  }
-
   async function startMeeting() {
     if (!quarter) return;
+    const startedIso = new Date().toISOString();
     const { data, error } = await supabase.from('meetings').upsert(
       {
         quarter_id: quarter.id, week_number: weekNum,
         meeting_date: new Date().toISOString().slice(0, 10),
         status: 'in_progress', attendees: activeTeam.map((t) => t.id),
+        timer_started_at: startedIso,
       },
       { onConflict: 'quarter_id,week_number' }
     ).select().single();
@@ -155,31 +166,49 @@ export default function MeetingPage() {
       setMeeting(m);
       setRating(Number(m.ratings?.overall) || 8);
       setCurrentStep(m.current_section ?? 0);
-      setElapsed(m.elapsed_seconds ?? 0);
-      setSectionAnchor(m.elapsed_seconds ?? 0);
-      setRunning(true);
+      setBaseElapsed(m.elapsed_seconds ?? 0);
+      setSectionStart(m.section_start_seconds ?? 0);
+      setTimerStartedAt(m.timer_started_at ? new Date(m.timer_started_at).getTime() : Date.parse(startedIso));
+      setNowTick(Date.now());
     }
   }
 
   function toggleTimer() {
-    setRunning((r) => {
-      if (r) persistTimer(); // pausing - save elapsed
-      return !r;
-    });
+    if (!meeting) return;
+    if (timerStartedAt !== null) {
+      // Pause: bank the running seconds into baseElapsed, clear the start marker.
+      const banked = baseElapsed + Math.max(0, Math.floor((Date.now() - timerStartedAt) / 1000));
+      setBaseElapsed(banked);
+      setTimerStartedAt(null);
+      supabase.from('meetings').update({ elapsed_seconds: banked, timer_started_at: null }).eq('id', meeting.id).then(() => {});
+    } else {
+      // Resume from now.
+      const startedIso = new Date().toISOString();
+      setTimerStartedAt(Date.parse(startedIso));
+      setNowTick(Date.now());
+      supabase.from('meetings').update({ timer_started_at: startedIso }).eq('id', meeting.id).then(() => {});
+    }
   }
 
   function resetTimer() {
     if (!confirm('Reset the meeting timer to 00:00?')) return;
-    setElapsed(0);
-    setSectionAnchor(0);
-    if (meeting) supabase.from('meetings').update({ elapsed_seconds: 0 }).eq('id', meeting.id).then(() => {});
+    setBaseElapsed(0);
+    setSectionStart(0);
+    const startedIso = timerStartedAt !== null ? new Date().toISOString() : null;
+    setTimerStartedAt(startedIso ? Date.parse(startedIso) : null);
+    setNowTick(Date.now());
+    if (meeting) supabase.from('meetings').update({
+      elapsed_seconds: 0, section_start_seconds: 0, timer_started_at: startedIso,
+    }).eq('id', meeting.id).then(() => {});
   }
 
   function goToStep(i: number) {
     if (i < 0 || i >= AGENDA.length) return;
     setCurrentStep(i);
-    setSectionAnchor(elapsed);
-    if (meeting) supabase.from('meetings').update({ current_section: i, elapsed_seconds: elapsed }).eq('id', meeting.id).then(() => {});
+    const mark = elapsed; // the new section's clock starts from the current elapsed
+    setSectionStart(mark);
+    // Record the section change only - the overall timer keeps running untouched.
+    if (meeting) supabase.from('meetings').update({ current_section: i, section_start_seconds: mark }).eq('id', meeting.id).then(() => {});
   }
 
   async function toggleTodo(t: Todo) {
@@ -192,19 +221,29 @@ export default function MeetingPage() {
 
   async function saveProgress(status?: 'in_progress' | 'completed') {
     if (!meeting) return;
+    const completing = status === 'completed';
+    const frozen = elapsed; // snapshot the live clock
     const patch: Record<string, unknown> = {
       notes: notes || null,
       cascading_messages: cascading || null,
       ratings: { overall: rating },
       section_notes: sectionNotes,
-      elapsed_seconds: elapsed,
       current_section: currentStep,
+      section_start_seconds: sectionStart,
     };
     if (status) patch.status = status;
-    if (status === 'completed') patch.duration_minutes = Math.max(Math.round(elapsed / 60), meeting.duration_minutes ?? 0) || TOTAL_MINS;
+    if (completing) {
+      // Completing is the only action that stops the clock.
+      patch.elapsed_seconds = frozen;
+      patch.timer_started_at = null;
+      patch.duration_minutes = Math.max(Math.round(frozen / 60), meeting.duration_minutes ?? 0) || TOTAL_MINS;
+    }
+    // For a plain "Save Progress" we deliberately do NOT rewrite elapsed_seconds
+    // or timer_started_at, so a running clock stays consistent and keeps going.
     await supabase.from('meetings').update(patch).eq('id', meeting.id);
-    if (status === 'completed') {
-      setRunning(false);
+    if (completing) {
+      setBaseElapsed(frozen);
+      setTimerStartedAt(null);
       setMsg('Meeting completed and saved to history');
     } else {
       setMsg('Progress saved');
@@ -214,7 +253,7 @@ export default function MeetingPage() {
   }
 
   const step = AGENDA[currentStep];
-  const sectionSecs = Math.max(elapsed - sectionAnchor, 0);
+  const sectionSecs = Math.max(elapsed - sectionStart, 0);
   const sectionOver = sectionSecs > step.mins * 60;
   const completed = meeting?.status === 'completed';
   const openTodos = useMemo(() => todos.filter((t) => !t.done), [todos]);
