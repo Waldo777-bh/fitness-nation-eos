@@ -7,6 +7,12 @@ import type { Todo } from '@/lib/types';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/** Today's date as YYYY-MM-DD in the user's local timezone (not UTC). */
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 export default function TodosPage() {
   const { supabase, team, activeTeam, quarters, activeQuarter, loading } = useEosCore();
   const { quarter, setQuarterId } = usePersistedQuarter(quarters, activeQuarter);
@@ -26,13 +32,16 @@ export default function TodosPage() {
     setTodos((data as Todo[]) ?? []);
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [supabase]);
+  // Default the new-to-do due date to today. Set after mount so server-rendered
+  // HTML and the client agree (avoids a hydration mismatch on the date value).
+  useEffect(() => { setDue(todayISO()); }, []);
 
   async function addTodo() {
     const t = title.trim();
     if (!t) { setFormMsg('Enter a to-do title first.'); return; }
     const { error } = await supabase.from('todos').insert({ title: t, owner_id: ownerId || null, due_date: due || null });
     if (error) { setFormMsg(`Could not add to-do: ${error.message}`); return; }
-    setTitle(''); setOwnerId(''); setDue('');
+    setTitle(''); setOwnerId(''); setDue(todayISO());
     setFormMsg(null);
     await load();
   }

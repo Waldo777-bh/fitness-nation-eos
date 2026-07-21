@@ -32,6 +32,21 @@ h1 {
   @apply bg-black border border-panelBorder rounded px-3 py-2 text-sm w-full focus:outline-none focus:border-accent;
 }
 
+/* Native date picker: keep the calendar icon + popup visible on the dark theme.
+   color-scheme:dark makes the browser render the picker indicator as a light icon
+   and the calendar popup in dark mode. Applies to every <input type="date">. */
+input[type="date"] {
+  color-scheme: dark;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 .nav-link {
   @apply flex items-center gap-3 px-3 py-2 text-sm text-zinc-400 hover:text-white border-l-2 border-transparent transition-colors uppercase tracking-wide font-semibold;
 }
